@@ -1,6 +1,6 @@
 # Implementation Plan: Read-Only Layout Inspection
 
-**Branch**: `dev` | **Date**: 2026-10-31 | **Spec**: [spec.md](./spec.md)
+**Branch**: `001-readonly-layout-inspection` | **Date**: 2026-10-31 | **Spec**: [spec.md](./spec.md)
 
 **Input**: Feature specification from `/specs/001-readonly-layout-inspection/spec.md`
 
@@ -10,7 +10,7 @@ Deliver Turnout's first safe vertical slice: an STDIO MCP server opens a user-se
 
 ## Technical Context
 
-**Language/Version**: Rust, stable toolchain pinned in `rust-toolchain.toml` after an implementation-time SDK compatibility check
+**Language/Version**: Rust 2024 edition; rolling `stable` channel in `rust-toolchain.toml`. This is a channel selection, not an exact compiler pin. Record the compiler version with validation results and commit `Cargo.lock` for dependency reproducibility.
 
 **Primary Dependencies**: `rmcp` (official Rust MCP SDK; server + STDIO features), Tokio, Serde, `schemars`; small error and test-only helpers chosen during implementation
 
@@ -24,9 +24,21 @@ Deliver Turnout's first safe vertical slice: an STDIO MCP server opens a user-se
 
 **Performance Goals**: Correctness and diagnostic completeness first; each committed representative fixture must complete deterministically in the automated suite. Production size and latency SLOs wait for a real compatibility corpus.
 
-**Constraints**: STDIO only; accept only plain-text `.xtc` initially (not `.xtce` archives); never write, rename, or alter source files; recognize only fixture-proven file features; disclose unknown records and unavailable values; do not directly link GPL-2.0-only parser code without a licensing decision
+**Constraints**: STDIO only; accept only plain-text `.xtc` initially (not `.xtce` archives); never write, rename, or alter source files; preserve valid UTF-8 labels; recognize only fixture-proven file features; disclose unknown records and unavailable values; do not directly link GPL-2.0-only parser code without a licensing decision
 
-**Scale/Scope**: One active inspection session per server process; header/metadata, bounds when available, and `STRAIGHT`, `CURVE`, and `TURNOUT` records with documented endpoint references; no editing, SVG, parts list, broad object support, or `.xtce` handling
+**Scale/Scope**: One active inspection session per server process; header/metadata, bounds when available, and `STRAIGHT`, `CURVE`, and `TURNOUT` records with documented endpoint references. The first regression fixture is `layouts/mrkln_sample.xtc`: four compound `TURNOUT` records with UTF-8 Märklin labels, `T4` connected endpoints, `E4` open endpoints, and visual subsegments terminating in `END$SEGS`; no editing, SVG, parts list, broad object support, or `.xtce` handling
+
+**Compatibility policy**: Accept only layout format version 12. Reject every other declared format version with `unsupported_version`; reject missing, malformed, or conflicting version declarations with `malformed_record`. Keep the producing application version separate and informational. For example, `VERSION 12 5.2.0` declares format 12 and application version 5.2.0; the sample's producer comment is additional provenance.
+
+**Bounds policy**: Room dimensions are declared metadata. Track bounds are a separate complete axis-aligned extent of track centerlines, excluding decorative lines, rail width, and room dimensions. Include straight endpoints, circular-arc interior extrema, and transformed turnout track segments. If any track geometry is unsupported, an unknown object cannot be established as non-track, or no tracks exist, return `bounds: null` plus `bounds_unavailable`. Never substitute room dimensions or endpoint-only extents for complete track bounds.
+
+## Design workflow and acceptance gates
+
+Phase 0 decisions are recorded in [research.md](./research.md); no product clarifications remain. Phase 1 contracts and entities are in [data-model.md](./data-model.md) and [contracts/read-only-tools.md](./contracts/read-only-tools.md).
+
+Implementation proceeds through typed domain validation, fixture-based record parsing, geometry bounds, and MCP mapping. Native record offsets and angle conversion belong in `xtc.rs`; tools consume application-owned values. Validate finite coordinates, unique object IDs, complete segment blocks, and endpoint references before a layout becomes usable. Dangling references produce explicit diagnostics; duplicate IDs prevent opening because identity is ambiguous.
+
+Acceptance requires analytical fixtures for arc extrema and rotated turnout segments, complete-versus-unavailable bounds, strict version acceptance/rejection, malformed paths and records, source integrity for every fixture, and actual executable STDIO calls. Tests sharing a file run sequentially during implementation. [quickstart.md](./quickstart.md) defines validation commands; this planning pass does not certify the current code as passing these gates.
 
 ## Constitution Check
 
@@ -40,7 +52,7 @@ The checked-in constitution is still its uncustomized template, so it has no enf
 - **Cross-platform design**: PASS. Use `PathBuf`, no production shell invocation, and SDK-provided STDIO.
 - **Safe dependency licensing**: PASS. The external GPL-2.0 parser is not a direct dependency without a later licensing decision.
 
-**Post-design re-check**: PASS. The data model, tool contract, and quickstart retain all five gates. Ratifying a real constitution remains a governance follow-up, not a blocker for this scoped proof of concept.
+**Post-design re-check**: PASS at design level. Strict format acceptance, conservative bounds availability, explicit units, source diagnostics, and immutable inputs preserve all five constraints. This is a design assessment, not evidence of implementation completion. The constitution remains an unratified template.
 
 ## Project Structure
 
@@ -54,7 +66,7 @@ specs/001-readonly-layout-inspection/
 ├── quickstart.md
 ├── contracts/
 │   └── read-only-tools.md
-└── tasks.md                 # Later, from speckit-tasks
+└── tasks.md                 # Existing implementation and convergence backlog
 ```
 
 ### Source Code (repository root)
@@ -63,24 +75,19 @@ specs/001-readonly-layout-inspection/
 src/
 ├── main.rs                  # Starts the STDIO server
 ├── lib.rs                   # Public library boundary
-├── mcp/
-│   ├── mod.rs
-│   ├── server.rs            # Tool router and inspection-session state
-│   └── tools.rs             # Typed inputs and structured outputs
-├── layout/
-│   ├── mod.rs
-│   └── model.rs             # Application-owned summary, tracks, diagnostics
-└── xtc/
-    ├── mod.rs
-    ├── reader.rs            # Narrow text-format parser
-    └── adapter.rs           # Maps parsed records to layout model
+├── mcp.rs                   # Typed tools, router, and inspection-session state
+├── layout.rs                # Application-owned summary, geometry, diagnostics
+└── xtc.rs                   # Narrow parser and adapter for the supported text format
 
 tests/
 ├── fixtures/
 │   ├── authored/            # Original .xtc inputs and manifests
-│   └── compatibility/       # Provenance-tracked, tool-produced corpus
+│   └── compatibility/       # Future provenance-tracked, tool-produced corpus
 ├── parser_tests.rs
 └── mcp_stdio_tests.rs
+
+layouts/
+└── mrkln_sample.xtc         # First committed compatibility fixture
 ```
 
 **Structure Decision**: Use one Cargo project. `xtc` is the only module that knows native record syntax; `layout` is the stable internal boundary for future CAD adapters and geometry work. The MCP layer never exposes parser-internal records directly.

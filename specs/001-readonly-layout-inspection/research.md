@@ -12,13 +12,21 @@
 
 ## Native format boundary and compatibility target
 
-**Decision**: Target XTrackCAD 5.3.1GA plain-text `.xtc` files first. Support documented headers/metadata and only `STRAIGHT`, `CURVE`, and `TURNOUT` records proven by fixtures, including documented endpoint references. Explicitly reject `.xtce` archives.
+**Decision**: Accept only plain-text `.xtc` layout format version 12, as clarified on 2026-10-31. The representative producer is XTrackCAD 5.3.1GA; application-version strings do not determine format acceptance. Reject any other declared format version with `unsupported_version`, and missing or malformed declarations with `malformed_record`. Support fixture-proven `STRAIGHT`, `CURVE`, and `TURNOUT` records and endpoint references; reject `.xtce` archives.
 
 **Rationale**: The official project identifies 5.3.1GA as current stable and documents the plain-text layout headers, version records, metadata, layers, `END$TRACKS`, track types, units, angular convention, and endpoint semantics. `.xtce` adds archive handling unrelated to the first vertical slice. The parser reports, rather than ignores, unrecognized top-level records and unsafe fields.
 
 **Alternatives considered**: Accept `.xtce` now (unnecessary archive complexity); support historical versions without fixtures (unverifiable); infer geometry from rendered output (lossy).
 
 **Sources**: [current release](https://sourceforge.net/p/xtrkcad-fork/wiki/DownloadInstall/), [layout-file reference](https://sourceforge.net/p/xtrkcad-fork/wiki/LayoutFile/), [layout elements](https://sourceforge.net/p/xtrkcad-fork/wiki/LayoutElements/), [concepts](https://sourceforge.net/p/xtrkcad-fork/wiki/Concepts/).
+
+## Committed representative layout
+
+**Decision**: Treat `layouts/mrkln_sample.xtc` as the first compatibility fixture and minimum supported real-world layout. It is UTF-8 text produced by XTrackCAD 5.3.1GA with `VERSION 12`, two title fields, HO scale, a 96-by-48 room, and four compound `TURNOUT` records. Its SHA-256 is `917a8445d1aca4d7caec360477e5acc509d0c9434e72781e0d8f55c7c225a24f`.
+
+**Rationale**: This fixture turns the initial format scope into a demonstrable contract. It requires that Turnout preserve non-ASCII Märklin catalogue names, recognise `T4` references between turnouts and `E4` open ends, and safely traverse visual subsegments (`S`, `C`, `L3`, `A3`) until `END$SEGS` without incorrectly reporting them as unsupported layout objects.
+
+**Alternatives considered**: Treat the sample only as an ad-hoc manual test (rejected: it would not prevent regressions); reject compound turnout data (rejected: it excludes the first supplied representative layout).
 
 ## Existing Rust parser
 
@@ -39,3 +47,23 @@
 **Alternatives considered**: Commit arbitrary user layouts (privacy/copyright risk); use only hand-authored fixtures (misses serializer quirks); use only external corpus (fragile exact expectations).
 
 **Sources**: [layout elements](https://sourceforge.net/p/xtrkcad-fork/wiki/LayoutElements/), [historical XTrackCAD documentation](https://sources.debian.org/src/xtrkcad/3.1.4-1/xtrkcad.help), [official project page](https://sourceforge.net/projects/xtrkcad-fork/).
+
+## Complete track bounds
+
+**Decision**: Keep room dimensions separate from complete track centerline bounds. Normalize understood geometry into world-space line segments and directed circular arcs. Bound lines by their endpoints; bound arcs by endpoints and each world cardinal angle included in the directed sweep. Full circles use circle bounds. For clockwise angles measured from positive Y, coordinates are `x = cx + r sin(angle)` and `y = cy + r cos(angle)` after conversion to a positive-radius internal arc.
+
+Transform turnout S endpoints and C centers/directions from local coordinates before calculating bounds. Derive the rotation mapping from the native convention and prove it with asymmetric fixtures; rotating a local bounding rectangle overestimates the actual geometry. Preserve native signed-radius direction semantics until converted into an explicit sweep; never discard the sign without accounting for direction. If sweep or direction is ambiguous, return unavailable bounds.
+
+**Rationale**: Endpoint-only extents can miss curve extrema, and room dimensions are not track extents. Unknown potentially-track objects, unsupported track segments, incomplete geometry, and empty layouts require `bounds: null` plus a diagnostic. Known decorative segments do not affect track bounds.
+
+**Alternatives considered**: Partial bounds marked complete (misleading); endpoint-only bounds (inexact); room dimensions substituted for track bounds (different meaning); rejecting otherwise readable layouts solely because bounds are unavailable (unnecessary loss of inspection value).
+
+**Sources**: [LayoutElements](https://sourceforge.net/p/xtrkcad-fork/wiki/LayoutElements/), [ParameterFileInformation](https://sourceforge.net/p/xtrkcad-fork/wiki/ParameterFileInformation/), [CompoundElements](https://sourceforge.net/p/xtrkcad-fork/wiki/CompoundElements/). The extrema algorithm is a mathematical design inference from the documented geometry conventions, not a claim of tested implementation coverage.
+
+## Toolchain and module layout
+
+**Decision**: Retain the repository's rolling Rust stable channel and current single-file modules `src/layout.rs`, `src/xtc.rs`, and `src/mcp.rs`. Record actual compiler versions in verification output and lock dependency versions with `Cargo.lock`.
+
+**Rationale**: These choices match the existing project and keep the first feature small. Exact compiler reproducibility is not an initial acceptance requirement. The native adapter remains isolated even within a single source file.
+
+**Alternatives considered**: Pin an exact compiler now (adds maintenance without a stated acceptance need); introduce nested modules immediately (unnecessary scaffolding for the current code size).
