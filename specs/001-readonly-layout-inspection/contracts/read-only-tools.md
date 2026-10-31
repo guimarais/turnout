@@ -60,7 +60,7 @@ Returns the supported `TrackObject` entries from the current inspection session.
 }
 ```
 
-The server returns only `straight`, `curve`, and `turnout` entries. If a file contains other records, the result includes a diagnostic; it must not silently imply the list is complete.
+The server returns only `straight`, `curve`, and `turnout` entries. Compound visual segments inside a supported turnout are part of that turnout rather than separate track entries. If a file contains other top-level records, the result includes a diagnostic; it must not silently imply the list is complete. Valid UTF-8 labels are returned verbatim.
 
 ## Stability and safety rules
 

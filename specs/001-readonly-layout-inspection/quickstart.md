@@ -11,7 +11,7 @@ This validates the planned vertical slice; it is not implementation code.
 ## Validate the fixture reader
 
 1. Run `cargo test --test parser_tests`.
-2. Confirm valid fixtures produce expected summary and supported straight, curve, and turnout counts.
+2. Confirm valid fixtures produce expected summary and supported straight, curve, and turnout counts. In particular, `layouts/mrkln_sample.xtc` returns four turnouts, its two titles, HO scale, room dimensions, UTF-8 Märklin labels, and endpoint states.
 3. Confirm malformed and unsupported-feature fixtures produce expected diagnostic codes.
 4. Confirm integrity assertions verify content and modification time are unchanged.
 

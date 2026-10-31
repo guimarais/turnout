@@ -24,7 +24,7 @@ State transitions: `Empty` → `Opening` → `Open` on a usable result; `Empty` 
 
 | Field | Description | Rules |
 |---|---|---|
-| `title` | Declared layout title | Optional; absence is explicit. |
+| `titles` | Declared layout title lines | Preserve each valid UTF-8 title verbatim and in source order; absence is explicit. |
 | `format_version` | Declared source version | Optional; never inferred. |
 | `scale` | Declared model-scale/map-scale data | Optional; distinguish scale from gauge. |
 | `bounds` | Overall layout extent | Optional; only present when safely determined. |
@@ -43,9 +43,9 @@ State transitions: `Empty` → `Opening` → `Open` on a usable result; `Empty` 
 | `kind` | `straight`, `curve`, or `turnout` | Only these types are supported. |
 | `position` | Anchor coordinate, when available | Explicit unit. |
 | `orientation` | Angular direction, when available | Preserve native clockwise convention; contract declares it. |
-| `endpoints` | Referenced connection ends | Unresolved references create diagnostics. |
+| `endpoints` | Referenced connection ends | Preserve whether each end connects to another track or is open; unresolved references create diagnostics. |
 
-Kind-specific data: a straight may include length; a curve may include radius and sweep; a turnout may include library/catalogue identity and endpoint data where the source exposes it. Fields cannot be populated from guesses.
+Kind-specific data: a straight may include length; a curve may include radius and sweep; a turnout includes its source identity, UTF-8 library/catalogue label when present, and endpoint data. A turnout's internal visual segments are safely traversed to its segment terminator but are not exposed as separate `TrackObject` entries in this milestone. Fields cannot be populated from guesses.
 
 ## Diagnostic
 

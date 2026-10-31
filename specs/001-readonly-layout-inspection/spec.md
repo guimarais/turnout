@@ -23,6 +23,7 @@ A model railway designer asks an MCP-compatible assistant to inspect an XTrackCA
 1. **Given** a valid supported XTrackCAD layout file, **When** the user opens it and requests layout information, **Then** the assistant receives a structured summary containing the layout identity and every supported metadata and bounds value available in that file.
 2. **Given** a layout lacking an optional metadata or bounds value, **When** the user requests layout information, **Then** the response identifies that value as unavailable rather than inventing it.
 3. **Given** a valid layout, **When** it is inspected, **Then** its contents and modification time remain unchanged.
+4. **Given** `layouts/mrkln_sample.xtc`, **When** the user opens it and requests layout information, **Then** the assistant receives its two titles, HO scale, 96-by-48 room size, and a summary of four supported turnouts.
 
 ---
 
@@ -38,6 +39,7 @@ A model railway designer asks an assistant what track objects a layout contains 
 
 1. **Given** a layout containing supported track sections and turnouts, **When** the user lists tracks, **Then** the assistant receives one structured entry for each supported object and can distinguish turnouts from other supported track sections.
 2. **Given** a layout containing an unsupported object, **When** the user lists tracks, **Then** the assistant reports the unsupported object or feature clearly without omitting that fact from the result.
+3. **Given** `layouts/mrkln_sample.xtc`, **When** the user lists tracks, **Then** the assistant receives four turnout entries in source order, preserving the UTF-8 Märklin catalogue labels and available connected or open endpoints.
 
 ---
 
@@ -76,6 +78,9 @@ A model railway designer gives the assistant a missing, malformed, or unsupporte
 - **FR-007**: The system MUST make a failed open unavailable for subsequent inspection until a layout is successfully opened.
 - **FR-008**: The system MUST include automated regression coverage for representative valid, malformed, and unsupported-feature layout samples where those samples may legally be retained.
 - **FR-009**: The system MUST make its read-only workflow usable on Linux and avoid assumptions that prevent later use on Windows or macOS.
+- **FR-010**: The system MUST preserve and return valid UTF-8 layout text, including track-library and catalogue labels containing non-ASCII characters.
+- **FR-011**: The system MUST successfully inspect `layouts/mrkln_sample.xtc` as a representative XTrackCAD 5.3.1GA input and report its declared titles, scale, room dimensions, and four turnout objects.
+- **FR-012**: The system MUST report the available endpoint state and references for supported turnout objects, including connections to another turnout and unconnected ends.
 
 ### Key Entities *(include if feature involves data)*
 
@@ -94,6 +99,7 @@ A model railway designer gives the assistant a missing, malformed, or unsupporte
 - **SC-003**: Automated tests demonstrate that inspection leaves every test input byte-for-byte unchanged.
 - **SC-004**: Automated tests cover a valid layout, a malformed layout, and a layout with at least one unsupported feature, and each produces the expected success or diagnostic outcome.
 - **SC-005**: A client can start the server and invoke the read-only workflow over the selected standard input/output transport on the supported development platform.
+- **SC-006**: Automated regression tests open `layouts/mrkln_sample.xtc`, return exactly four turnout entries in source order, and preserve its UTF-8 labels and source bytes unchanged.
 
 ## Assumptions
 
@@ -102,3 +108,4 @@ A model railway designer gives the assistant a missing, malformed, or unsupporte
 - The first proof of concept supports only file paths explicitly supplied by the user or MCP client and does not scan directories.
 - Supported metadata, objects, bounds, and connections depend on demonstrated parser coverage; unavailable fields are reported as unavailable rather than inferred.
 - Parser evaluation may result in a direct dependency, an adapter, or a small in-project reader; the chosen implementation must preserve the specified observable behavior.
+- `layouts/mrkln_sample.xtc` is the first committed compatibility fixture. It is a plain-text UTF-8 XTrackCAD 5.3.1GA file and establishes the minimum support for turnout-only layouts with Märklin catalogue labels.

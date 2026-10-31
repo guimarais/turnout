@@ -20,6 +20,14 @@
 
 **Sources**: [current release](https://sourceforge.net/p/xtrkcad-fork/wiki/DownloadInstall/), [layout-file reference](https://sourceforge.net/p/xtrkcad-fork/wiki/LayoutFile/), [layout elements](https://sourceforge.net/p/xtrkcad-fork/wiki/LayoutElements/), [concepts](https://sourceforge.net/p/xtrkcad-fork/wiki/Concepts/).
 
+## Committed representative layout
+
+**Decision**: Treat `layouts/mrkln_sample.xtc` as the first compatibility fixture and minimum supported real-world layout. It is UTF-8 text produced by XTrackCAD 5.3.1GA with `VERSION 12`, two title fields, HO scale, a 96-by-48 room, and four compound `TURNOUT` records. Its SHA-256 is `917a8445d1aca4d7caec360477e5acc509d0c9434e72781e0d8f55c7c225a24f`.
+
+**Rationale**: This fixture turns the initial format scope into a demonstrable contract. It requires that Turnout preserve non-ASCII Märklin catalogue names, recognise `T4` references between turnouts and `E4` open ends, and safely traverse visual subsegments (`S`, `C`, `L3`, `A3`) until `END$SEGS` without incorrectly reporting them as unsupported layout objects.
+
+**Alternatives considered**: Treat the sample only as an ad-hoc manual test (rejected: it would not prevent regressions); reject compound turnout data (rejected: it excludes the first supplied representative layout).
+
 ## Existing Rust parser
 
 **Decision**: Do not make `xtrakcad_parser` a direct production dependency. Use its documented behavior only as a comparison target during an isolated fixture spike; build the production reader behind Turnout's owned adapter boundary.

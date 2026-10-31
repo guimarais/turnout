@@ -24,9 +24,9 @@ Deliver Turnout's first safe vertical slice: an STDIO MCP server opens a user-se
 
 **Performance Goals**: Correctness and diagnostic completeness first; each committed representative fixture must complete deterministically in the automated suite. Production size and latency SLOs wait for a real compatibility corpus.
 
-**Constraints**: STDIO only; accept only plain-text `.xtc` initially (not `.xtce` archives); never write, rename, or alter source files; recognize only fixture-proven file features; disclose unknown records and unavailable values; do not directly link GPL-2.0-only parser code without a licensing decision
+**Constraints**: STDIO only; accept only plain-text `.xtc` initially (not `.xtce` archives); never write, rename, or alter source files; preserve valid UTF-8 labels; recognize only fixture-proven file features; disclose unknown records and unavailable values; do not directly link GPL-2.0-only parser code without a licensing decision
 
-**Scale/Scope**: One active inspection session per server process; header/metadata, bounds when available, and `STRAIGHT`, `CURVE`, and `TURNOUT` records with documented endpoint references; no editing, SVG, parts list, broad object support, or `.xtce` handling
+**Scale/Scope**: One active inspection session per server process; header/metadata, bounds when available, and `STRAIGHT`, `CURVE`, and `TURNOUT` records with documented endpoint references. The first regression fixture is `layouts/mrkln_sample.xtc`: four compound `TURNOUT` records with UTF-8 Märklin labels, `T4` connected endpoints, `E4` open endpoints, and visual subsegments terminating in `END$SEGS`; no editing, SVG, parts list, broad object support, or `.xtce` handling
 
 ## Constitution Check
 
@@ -78,9 +78,12 @@ src/
 tests/
 ├── fixtures/
 │   ├── authored/            # Original .xtc inputs and manifests
-│   └── compatibility/       # Provenance-tracked, tool-produced corpus
+│   └── compatibility/       # Future provenance-tracked, tool-produced corpus
 ├── parser_tests.rs
 └── mcp_stdio_tests.rs
+
+layouts/
+└── mrkln_sample.xtc         # First committed compatibility fixture
 ```
 
 **Structure Decision**: Use one Cargo project. `xtc` is the only module that knows native record syntax; `layout` is the stable internal boundary for future CAD adapters and geometry work. The MCP layer never exposes parser-internal records directly.
