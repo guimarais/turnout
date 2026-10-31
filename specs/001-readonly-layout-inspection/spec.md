@@ -1,12 +1,19 @@
 # Feature Specification: Read-Only Layout Inspection
 
-**Feature Branch**: `dev`
+**Feature Branch**: `001-readonly-layout-inspection`
 
 **Created**: 2026-10-31
 
-**Status**: Draft
+**Status**: Implemented; Linux validation completed on 2026-10-31. See [verification results](quickstart.md#verified-implementation-results--2026-10-31).
 
 **Input**: User description: "Design a plan for the initial implementations: a read-only XTrackCAD layout-inspection proof of concept."
+
+## Clarifications
+
+### Session 2026-10-31
+
+- Q: How should Turnout handle files declaring a format version it has not been tested to read? → A: Accept format version 12; reject every other format version with `unsupported_version`. The XTrackCAD application version is informational and does not independently cause rejection.
+- Q: What should Turnout report as layout bounds in this first release? → A: Report room dimensions separately from complete track bounds. Return track bounds only when all track geometry can be interpreted reliably; otherwise mark track bounds unavailable and provide a diagnostic.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -20,10 +27,12 @@ A model railway designer asks an MCP-compatible assistant to inspect an XTrackCA
 
 **Acceptance Scenarios**:
 
-1. **Given** a valid supported XTrackCAD layout file, **When** the user opens it and requests layout information, **Then** the assistant receives a structured summary containing the layout identity and every supported metadata and bounds value available in that file.
+1. **Given** a valid supported XTrackCAD layout file, **When** the user opens it and requests layout information, **Then** the assistant receives a structured summary containing the source path, layout identity, and every supported metadata and dimensions value available in that file.
 2. **Given** a layout lacking an optional metadata or bounds value, **When** the user requests layout information, **Then** the response identifies that value as unavailable rather than inventing it.
 3. **Given** a valid layout, **When** it is inspected, **Then** its contents and modification time remain unchanged.
-4. **Given** `layouts/mrkln_sample.xtc`, **When** the user opens it and requests layout information, **Then** the assistant receives its two titles, HO scale, 96-by-48 room size, and a summary of four supported turnouts.
+4. **Given** `layouts/mrkln_sample.xtc`, **When** the user opens it and requests layout information, **Then** the assistant receives its two titles, HO scale, 96-by-48 inch room size, and a summary of four supported turnouts.
+5. **Given** a nonempty layout whose track geometry can all be interpreted, **When** the user requests layout information, **Then** the result contains the complete axis-aligned track extent in inches, separately from declared room dimensions.
+6. **Given** a layout with any uninterpretable track geometry or no track objects, **When** the user requests layout information, **Then** track bounds are explicitly unavailable with a diagnostic, and room dimensions remain independently available when declared.
 
 ---
 
@@ -55,7 +64,8 @@ A model railway designer gives the assistant a missing, malformed, or unsupporte
 
 1. **Given** a nonexistent or unreadable path, **When** the user tries to open it, **Then** the assistant receives a failure that identifies the path and access problem.
 2. **Given** a malformed layout, **When** the user tries to open it, **Then** the assistant receives a failure or diagnostic that identifies the parsing problem without presenting a successful layout summary.
-3. **Given** a layout containing unknown features, **When** the known portion can still be inspected, **Then** the assistant receives the supported results together with explicit warnings about unknown features.
+3. **Given** a format-version-12 layout containing unknown features, **When** the known portion can still be inspected safely, **Then** the assistant receives supported results together with explicit warnings; if safe interpretation cannot be established, the open fails with a diagnostic.
+4. **Given** a layout declaring any format version other than 12, **When** the user opens it, **Then** the open fails with `unsupported_version`, regardless of its XTrackCAD application version.
 
 ### Edge Cases
 
@@ -77,16 +87,19 @@ A model railway designer gives the assistant a missing, malformed, or unsupporte
 - **FR-006**: The system MUST leave source layout files unchanged for every operation in this feature.
 - **FR-007**: The system MUST make a failed open unavailable for subsequent inspection until a layout is successfully opened.
 - **FR-008**: The system MUST include automated regression coverage for representative valid, malformed, and unsupported-feature layout samples where those samples may legally be retained.
-- **FR-009**: The system MUST make its read-only workflow usable on Linux and avoid assumptions that prevent later use on Windows or macOS.
+- **FR-009**: The first release MUST run on Linux and use portable path and file handling that does not preclude later Windows or macOS support.
 - **FR-010**: The system MUST preserve and return valid UTF-8 layout text, including track-library and catalogue labels containing non-ASCII characters.
-- **FR-011**: The system MUST successfully inspect `layouts/mrkln_sample.xtc` as a representative XTrackCAD 5.3.1GA input and report its declared titles, scale, room dimensions, and four turnout objects.
+- **FR-011**: The system MUST successfully inspect `layouts/mrkln_sample.xtc` as a representative XTrackCAD 5.3.1GA input and report its source path, declared titles, scale, room dimensions in inches, and four turnout objects.
 - **FR-012**: The system MUST report the available endpoint state and references for supported turnout objects, including connections to another turnout and unconnected ends.
+- **FR-013**: The system MUST include the source path in every successful `open_layout` result.
+- **FR-014**: The system MUST accept only declared layout format version 12 and reject every other format version with `unsupported_version`. The XTrackCAD application version MUST be reported separately and MUST NOT independently cause rejection. A missing or malformed format-version declaration MUST fail with `malformed_record`.
+- **FR-015**: The system MUST report declared room dimensions separately from track bounds. Track bounds MUST describe the complete axis-aligned extent of all track centerline geometry in inches, including curve extrema and compound turnout track segments; decorative objects and track width are excluded. If any track geometry cannot be interpreted reliably, an unknown object cannot be established as non-track, or the layout contains no tracks, track bounds MUST be explicitly unavailable with a diagnostic. Partial track bounds MUST NOT be presented as complete.
 
 ### Key Entities *(include if feature involves data)*
 
 - **Layout source**: A user-supplied native XTrackCAD layout file selected for read-only inspection.
 - **Inspection session**: The current successfully opened layout and the diagnostics created while reading it.
-- **Layout summary**: Supported metadata, bounds, dimensions, and declared availability of omitted values.
+- **Layout summary**: Supported metadata, declared room dimensions, complete axis-aligned track bounds in inches when calculable, and explicit unavailability with diagnostics otherwise.
 - **Track object**: A supported section or turnout with a stable source-derived identifier, type, and available geometric information.
 - **Diagnostic**: A warning or error describing unreadable input, malformed data, or an unsupported feature.
 
@@ -94,7 +107,7 @@ A model railway designer gives the assistant a missing, malformed, or unsupporte
 
 ### Measurable Outcomes
 
-- **SC-001**: A user can complete the open-and-summary workflow for a representative valid layout in one MCP interaction sequence with no manual file conversion.
+- **SC-001**: A user can complete the open-and-summary workflow for a representative valid layout in one MCP interaction sequence and receive the source path without manual file conversion.
 - **SC-002**: For each supported object in the committed representative fixtures, the returned object count and type match the fixture's expected result exactly.
 - **SC-003**: Automated tests demonstrate that inspection leaves every test input byte-for-byte unchanged.
 - **SC-004**: Automated tests cover a valid layout, a malformed layout, and a layout with at least one unsupported feature, and each produces the expected success or diagnostic outcome.
@@ -103,7 +116,7 @@ A model railway designer gives the assistant a missing, malformed, or unsupporte
 
 ## Assumptions
 
-- The initial compatibility target is the current stable XTrackCAD layout-file form represented by the first legally retainable fixtures; exact version compatibility will be recorded with those fixtures.
+- The initial compatibility target is layout format version 12, represented by the XTrackCAD 5.3.1GA sample. The format version and producing application version are distinct values.
 - The first feature is intentionally limited to inspection; creation, modification, native writing, visual export, and parts-list export are out of scope.
 - The first proof of concept supports only file paths explicitly supplied by the user or MCP client and does not scan directories.
 - Supported metadata, objects, bounds, and connections depend on demonstrated parser coverage; unavailable fields are reported as unavailable rather than inferred.

@@ -1,0 +1,22 @@
+{
+  "fixtures": [
+    {
+      "path": "layouts/mrkln_sample.xtc",
+      "origin": "User-supplied layout added to this repository during feature planning",
+      "producer": "XTrackCAD 5.3.1GA (source comment)",
+      "format_version": 12,
+      "application_version_record": "5.2.0",
+      "redistribution_permission": "Not independently verified; obtain confirmation before redistributing the layout outside this repository",
+      "sha256": "917a8445d1aca4d7caec360477e5acc509d0c9434e72781e0d8f55c7c225a24f",
+      "expected": {
+        "titles": ["mcptest", "Trying to connect it"],
+        "scale": "HO",
+        "room_dimensions": {"width": 96, "height": 48, "unit": "inch"},
+        "track_count": 4,
+        "turnout_count": 4,
+        "supported_records": ["VERSION", "TITLE1", "TITLE2", "MAPSCALE", "ROOMSIZE", "SCALE", "LAYERS", "TURNOUT", "T4", "E4", "D", "P", "S", "C", "L3", "A3", "END$SEGS", "END$TRACKS"],
+        "unsupported_records": []
+      }
+    }
+  ]
+}

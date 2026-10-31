@@ -14,6 +14,8 @@ Opens a file for read-only inspection and replaces any current session only afte
 
 `path` is required and must resolve to a readable regular plain-text `.xtc` file.
 
+Only declared native format version 12 is accepted. Every other format number returns `ok: false` with `unsupported_version`; missing, malformed, or conflicting version declarations return `malformed_record`. The application-version string and producer comment are informational and never independently reject a file.
+
 ### Successful result
 
 ```json
@@ -38,7 +40,9 @@ Opens a file for read-only inspection and replaces any current session only afte
 
 ## `get_layout_info`
 
-Returns the `LayoutSummary` for the current inspection session. It takes no input. The result contains `ok: true`, `source`, `summary`, and session diagnostics. Optional metadata and bounds are either omitted or explicitly unavailable; implementation chooses one convention and applies it consistently. With no usable open layout, return `ok: false` with `no_open_layout`.
+Returns the `LayoutSummary` for the current inspection session. It takes no input. The result contains `ok: true`, `source`, `summary`, and session diagnostics. Optional fields are explicitly null when unavailable, consistently across all tools. With no usable open layout, return `ok: false` with `no_open_layout`.
+
+Both `open_layout` and `get_layout_info` expose `summary.format_version` as integer 12 and `summary.application_version` as separate source text. `summary.room_dimensions` is `{width, height, unit: "inch"}` or null. `summary.bounds` is `{min_x, min_y, max_x, max_y, unit: "inch"}` or null. Track bounds encompass all track centerlines, including curve extrema and transformed turnout segments; room dimensions and decorative geometry do not contribute. Incomplete or unknown track geometry and empty layouts yield null bounds with a `bounds_unavailable` diagnostic. An otherwise inspectable layout can still return `ok: true` when bounds are unavailable. Open results include all inspection diagnostics immediately.
 
 ## `list_tracks`
 
@@ -68,3 +72,5 @@ The server returns only `straight`, `curve`, and `turnout` entries. Compound vis
 - No tool writes, renames, or changes permissions of a source layout.
 - Numeric geometry always identifies its unit. Angles document their rotation convention.
 - Result ordering follows stable source order.
+- Every position, endpoint, radius, and length identifies inches; every orientation and sweep identifies degrees and its direction convention. Zero direction points along positive Y, increasing clockwise.
+- Duplicate track IDs fail with `malformed_record`; dangling endpoint references produce `invalid_reference` diagnostics with source locations.

@@ -218,3 +218,10 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Rust build artifacts and local tooling
+/target/
+**/*.rs.bk
+*.rlib
+*.profraw
+.rustc_info.json

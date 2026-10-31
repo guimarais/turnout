@@ -105,6 +105,18 @@ Important distinctions:
 
 Collect representative `.xtc` sample files early, ideally including simple and more complex layouts, and keep suitable fixtures in the test suite if licensing and privacy permit.
 
+### 5.1 Track systems and parameter libraries
+
+Track systems provide catalogues of reusable parts: straights, curves, turnouts, crossings, and other features. In XTrackCAD these definitions are stored in `.xtp` parameter files. A track system may span multiple files, and a layout may use parts from multiple systems or custom libraries.
+
+Keep the **placed track instance** in a layout distinct from the **part definition** in a parameter library. XTrackCAD copies turnout and structure definitions into the `.xtc` file when they are placed; the original parameter file is not required to inspect those instances. Consequently, a layout alone does not necessarily identify the original library or contain the complete catalogue needed to design an extension.
+
+After a layout is loaded, Turnout must be able to resolve relevant parameter libraries and retrieve their available part definitions through MCP. This is a prerequisite for designing a complete layout using actual catalogue parts. Use explicitly configured library files or directories; report missing or ambiguous matches and allow explicit library selection. Do not assume one library per layout or infer an entire catalogue from the parts already placed.
+
+The required behaviour, proposed MCP workflow, and acceptance cases are recorded in [Track parameter catalogue retrieval](docs/track-parameter-catalog.md). This is a follow-on capability to the initial read-only inspection feature, and is not implemented by its existing tools.
+
+Format reference: [XTrackCAD parameter file information](https://sourceforge.net/p/xtrkcad-fork/wiki/ParameterFileInformation/).
+
 ## 6. Core product capabilities
 
 The long-term product should cover the following areas.
@@ -180,6 +192,18 @@ Useful output formats include:
 
 SVG is a useful early visualisation target; it is not a replacement for the native XTrackCAD file.
 
+### 6.7 Retrieve track-system catalogues
+
+- Read supported `.xtp` parameter libraries from configured sources.
+- Resolve candidate libraries after opening a layout, preserving uncertainty about their relationship to placed parts.
+- List and search available parts, including parts not yet placed in the layout.
+- Retrieve part identity, manufacturer, catalogue number, scale, and supported geometry, endpoints, and routes.
+- Report units, provenance, unsupported definitions, and missing information explicitly.
+- Support multiple libraries, custom parts, and explicit selection when automatic resolution is insufficient.
+- Keep layout inspection available when the original parameter libraries are absent.
+
+Library retrieval is read-only. Placement, connection, and native writing remain separate capabilities.
+
 ## 7. Scales, gauges, and units
 
 Turnout must not be hardcoded for a single model railway scale.
@@ -220,6 +244,10 @@ The design should expose narrowly scoped tools with structured inputs and output
 | `get_layout_info` | Return layout metadata and dimensions |
 | `list_tracks` | List supported track objects |
 | `get_track_details` | Inspect one track object |
+| `list_track_libraries` | Return available libraries and their resolution status for the open layout |
+| `select_track_libraries` | Explicitly select libraries for the open layout |
+| `list_track_parts` | Search available part definitions in selected libraries |
+| `get_track_part` | Retrieve a part definition with supported geometry and provenance |
 | `validate_layout` | Check supported geometry and connectivity rules |
 | `create_layout` | Create a new layout |
 | `add_straight` | Add a straight track section |
@@ -326,6 +354,16 @@ The internal layout model should be separated from the XTrackCAD parser so that 
 
 **Exit criterion:** An assistant can inspect a real layout without modifying it.
 
+### Milestone 2a — Track parameter catalogue retrieval
+
+- Specify and implement configured `.xtp` library sources and explicit library selection.
+- Resolve relevant library candidates when a layout is opened, without assuming a unique original source.
+- Expose catalogue search and part details through MCP, including unplaced parts.
+- Preserve scale, units, endpoints, routes, source identity, and diagnostic information.
+- Add fixtures for mixed libraries, custom parts, missing libraries, ambiguous matches, and unsupported definitions.
+
+**Exit criterion:** After opening a layout, an assistant can retrieve supported parts from the selected track-system libraries, including parts absent from the layout; missing or ambiguous libraries are reported without preventing layout inspection.
+
 ### Milestone 3 — Geometry and validation
 
 - Implement coordinate and unit conventions.
@@ -339,6 +377,7 @@ The internal layout model should be separated from the XTrackCAD parser so that 
 ### Milestone 4 — Creation and editing
 
 - Implement layout creation.
+- Use retrieved parameter-library definitions for catalogue part placement; do not invent dimensions or substitute similarly named parts silently.
 - Implement track insertion, deletion, movement, and rotation.
 - Implement supported turnout and connection operations.
 - Design and implement native file writing.
@@ -387,7 +426,7 @@ These questions should be addressed through Spec-Kit clarification and planning 
 4. What objects and file features does the parser actually support?
 5. Can unknown objects be preserved during a read-modify-write cycle?
 6. What is the native file-writing strategy?
-7. Which track libraries should be supported first?
+7. Which track libraries should be supported first, and which configured files or directories will provide them? See [catalogue retrieval requirements](docs/track-parameter-catalog.md).
 8. What should the first editing release support beyond basic track, curves, and turnouts?
 9. What exact MCP clients and versions should be included in the initial compatibility tests?
 10. Which target architectures should be included in the first cross-platform release?
@@ -411,3 +450,5 @@ These questions should be addressed through Spec-Kit clarification and planning 
 ## 15. Short project summary
 
 **Turnout** is a cross-platform Rust-based MCP server intended to let AI assistants inspect, analyse, create, and modify model railway layouts in XTrackCAD. It starts with Linux development and must be designed for future Windows and macOS support. Its first priority is reliable read-only parsing and layout analysis; geometry, validation, native file writing, and editing follow in later milestones. It must support multiple scales, gauges, and measurement units, preserve user data, and never silently discard unsupported layout information.
+
+Before catalogue-based layout creation, Turnout must retrieve the reusable part definitions in the relevant XTrackCAD `.xtp` parameter libraries after a layout is loaded. Placed instances and available catalogue parts are separate concepts; unavailable libraries must not prevent inspection.

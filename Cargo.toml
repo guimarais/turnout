@@ -1,0 +1,19 @@
+[package]
+name = "turnout"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-only"
+description = "Read-only XTrackCAD layout inspection MCP server"
+
+[dependencies]
+rmcp = { version = "0.8", features = ["server", "transport-io", "macros"] }
+anyhow = "1"
+schemars = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+[dev-dependencies]
+rmcp = { version = "0.8", features = ["client", "transport-child-process"] }
+tempfile = "3"
+tokio = { version = "1", features = ["process", "time", "io-util"] }
