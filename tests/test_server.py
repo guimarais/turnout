@@ -239,17 +239,11 @@ class InspectionTests(unittest.TestCase):
 
 
 class ProtocolTests(unittest.IsolatedAsyncioTestCase):
-    async def test_compatibility_launcher_from_outside_checkout(self):
-        await self.check_stdio([str(server.ROOT / "main.py")])
-
     async def test_module_launcher_from_outside_checkout(self):
-        await self.check_stdio(["-m", "turnout"])
-
-    async def check_stdio(self, args):
         from mcp import ClientSession, StdioServerParameters
         from mcp.client.stdio import stdio_client
 
-        params = StdioServerParameters(command=sys.executable, args=args, cwd=tempfile.gettempdir())
+        params = StdioServerParameters(command=sys.executable, args=["-m", "turnout"], cwd=tempfile.gettempdir())
         async with stdio_client(params) as (read, write):
             async with ClientSession(read, write, read_timeout_seconds=timedelta(seconds=10)) as session:
                 await session.initialize()

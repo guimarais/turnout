@@ -17,9 +17,8 @@ uv run --locked python -m turnout
 
 `uv sync` installs this checkout as an editable package. Keep the checkout and
 its data directories in place; standalone wheel installation is not supported.
-The existing `uv run --locked main.py` command remains available for compatibility.
-After pulling this reorganization, run `uv sync --locked` once before using an
-existing MCP registration.
+After pulling this reorganization, run `uv sync --locked` and re-register any MCP
+client that previously launched the removed root script using the command below.
 
 The server uses stdio, so the second command waits for an MCP client rather than
 showing an interactive prompt. Diagnostics go to stderr.
@@ -27,18 +26,18 @@ showing an interactive prompt. Diagnostics go to stderr.
 Register this checkout with Codex (run from the repository root):
 
 ```sh
-codex mcp add turnout -- "$PWD/.venv/bin/python" "$PWD/main.py"
+codex mcp add turnout -- "$PWD/.venv/bin/python" -m turnout
 codex mcp get turnout
 ```
 
 Restart the Codex client or open a new chat if the tools aren't visible. Moving
 the checkout requires registering the new absolute paths. Alternatively, merge
-this into your Codex MCP configuration, replacing both example paths:
+this into your Codex MCP configuration, replacing the example Python path:
 
 ```toml
 [mcp_servers.turnout]
 command = "/absolute/path/to/turnout/.venv/bin/python"
-args = ["/absolute/path/to/turnout/main.py"]
+args = ["-m", "turnout"]
 ```
 
 See the [official Codex MCP configuration documentation](https://learn.chatgpt.com/docs/extend/mcp?surface=cli).
@@ -56,7 +55,6 @@ The server does not call a model or require an API key.
 | `docs/` | Feature roadmap and repository rules |
 | `.github/` | CI, dependency updates, and contribution templates |
 | `layouts/`, `previews/` | Local generated outputs, ignored by Git |
-| `main.py` | Compatibility launcher for existing MCP registrations |
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development checks and
 [repository rules](docs/REPOSITORY_RULES.md) for proposed GitHub protections and
