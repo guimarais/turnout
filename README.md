@@ -4,6 +4,8 @@ A local Python MCP server that helps an AI build flat Märklin C-track layouts
 for XTrackCAD. Python computes geometry; the AI chooses an ordered sequence of
 catalogue pieces. The only direct dependency is the official Python MCP SDK.
 
+See [ROADMAP.md](ROADMAP.md) for the proposed feature plan and next milestone.
+
 ## Run and connect
 
 Requires Python 3.13+ and `uv`.
