@@ -14,16 +14,19 @@
 The configuration follows the official [uv Actions guide](https://docs.astral.sh/uv/guides/integration/github/)
 and [uv Dependabot guide](https://docs.astral.sh/uv/guides/integration/dependabot/).
 
-## Proposed default-branch ruleset
+## Main-branch policy
 
-These are recommendations, not settings applied to GitHub. After the workflow
-has run on GitHub, create an active branch ruleset under repository Settings →
-Rules → Rulesets targeting the default branch:
+Every merge must leave `main` usable. Keep unfinished functionality inaccessible
+until it is ready. Maintainer and agent changes follow the same rules.
 
-| Setting | Recommended value |
+The active [Main PR policy ruleset](https://github.com/guimarais/turnout/rules/26382156)
+targets `refs/heads/main`. Its configuration and the repository merge settings
+were applied and verified on 2026-11-02:
+
+| Setting | Required value |
 | --- | --- |
 | Require a pull request before merging | Enabled |
-| Required approving reviews | 0 while there is one maintainer |
+| Required approving reviews | 0; no assigned reviewer requirement |
 | Require conversation resolution | Enabled |
 | Require status checks | Select the `tests` check from GitHub Actions |
 | Require branches to be up to date | Enabled |
@@ -31,10 +34,25 @@ Rules → Rulesets targeting the default branch:
 | Restrict deletions | Enabled |
 
 Do not enable “Restrict updates”: that would prevent ordinary merges without a
-bypass. Avoid routine bypasses; the maintainer should use PRs and passing checks
-too. As a repository merge preference, enable squash merging and automatic
-deletion of merged branches. Use descriptive PR titles without mandating a
-commit-message convention.
+bypass. Allow only squash merges and automatically delete merged branches.
+Use descriptive PR titles without mandating a commit-message convention.
+
+Repository administrators may bypass merge gates through a PR for emergency
+recovery only. Record the reason, skipped or failed validation, risk, and recovery
+or follow-up work in that PR. Routine changes must pass every gate. Direct
+pushes, force pushes, and deletion of `main` are not emergency bypass paths.
+
+Each PR must describe the problem, resulting behavior, validation performed, and
+material risks. Keep changes focused, include relevant regression tests, and
+update affected documentation. Validation must match the change: geometry or
+export changes need representative fixtures and recorded XTrackCAD version and
+open/save/reopen results. Arbitrary coverage percentages and PR size limits are
+not required.
+
+Hosted enforcement is separate from these files. Check the repository's active
+rulesets and merge settings on GitHub when verifying enforcement. GitHub enforces
+merge gates; PR evidence, continued usability, and the emergency-only bypass
+policy remain maintainer responsibilities.
 
 See GitHub's [available rules and plan availability](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets).
 Require only checks that actually run on every PR; a renamed or filtered-out
@@ -53,9 +71,9 @@ required check can block merges.
 3. **Formatting and linting when consistency becomes work.** Adopt one tool,
    such as Ruff, with an agreed configuration and a passing baseline before
    making its CI check mandatory. Avoid layering multiple overlapping tools.
-4. **Independent review when there is a second maintainer.** Require one
-   approval and dismiss stale approvals. Add CODEOWNERS only once ownership is
-   established; do not create an approval requirement nobody can satisfy.
+4. **Independent review if agreed later.** There is currently no approval or
+   assigned reviewer requirement. Revisit this policy explicitly if review needs
+   change; adding maintainers does not automatically introduce a requirement.
 5. **Compatibility evidence as support expands.** Add Python/OS CI jobs for
    environments you commit to support and versioned XTrackCAD fixtures for new
    file formats. Keep manual open/save/reopen acceptance for writer changes.

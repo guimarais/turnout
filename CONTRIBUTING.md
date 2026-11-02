@@ -21,10 +21,16 @@ place. Standalone wheel distribution is outside the current scope.
 ## Changes and pull requests
 
 - Work on a short-lived branch and open a focused PR with a descriptive title.
-- Explain the behavior change and verification. Include a small regression test
+- Keep `main` usable after every merge; unfinished functionality must remain
+  inaccessible until ready.
+- Explain the problem, resulting behavior, verification, and material risks.
+  Include a small regression test
   for changed geometry, parsing, validation, or protocol behavior.
 - Run the full checks above before requesting merge. CI includes a real MCP client
   testing the package entry point from outside the checkout.
+- Before merging, the PR must be up to date with `main`, pass the required `tests`
+  check, and have all review conversations resolved. No approvals or assigned
+  reviewers are required. Squash merge and delete the merged branch.
 - Commit dependency changes in `pyproject.toml` and `uv.lock` together; use
   `uv lock` after intentional dependency edits. Do not hand-edit the lockfile.
 - Keep catalogue/reference inputs under `data/catalogues/` and `examples/`.
@@ -40,6 +46,8 @@ place. Standalone wheel distribution is outside the current scope.
 
 ## Repository policy
 
-See [repository rules](docs/REPOSITORY_RULES.md) for proposed GitHub settings and
-optional next steps. Hosted settings require a separate configuration change;
-committing the workflow and this guide does not enable branch protection.
+See [repository rules](docs/REPOSITORY_RULES.md) for the main-branch policy and
+optional next steps. These rules apply to maintainers and agents alike. An
+administrator may bypass merge gates only for emergency recovery through a PR;
+explain the reason, validation gaps, risks, and recovery or follow-up work there.
+Committing this guide does not itself enable GitHub enforcement.
