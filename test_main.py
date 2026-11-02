@@ -97,6 +97,146 @@ class LayoutTests(unittest.TestCase):
         self.assertFalse(main.intersections(top, main.Segment((-20, -5), (20, -5))))
 
 
+class InspectionTests(unittest.TestCase):
+    sample = (main.ROOT / "files/mrkln_sample.xtc").read_text()
+
+    def inspect_text(self, text):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "input.xtc"
+            source.write_text(text)
+            before = source.read_bytes()
+            with patch.object(main, "PREVIEWS", Path(directory) / "previews"):
+                result = main.inspect_layout(str(source))
+            self.assertEqual(source.read_bytes(), before)
+            if result["ok"]:
+                preview = Path(result["preview_path"])
+                self.assertNotEqual(preview, source)
+                svg = preview.read_text()
+                from xml.etree import ElementTree
+                ElementTree.fromstring(svg)
+            else:
+                self.assertFalse((Path(directory) / "previews").exists())
+                svg = ""
+            return result, svg
+
+    def test_sample_turnout_all_segments_and_open_end_references(self):
+        result, svg = self.inspect_text(self.sample)
+        self.assertEqual(result["status"], "complete")
+        self.assertEqual(result["parts"], {"24229": 1, "24130": 2, "24612": 1})
+        self.assertEqual(result["components"], [[1, 2, 3, 4]])
+        self.assertEqual(result["connection_issues"], [])
+        self.assertEqual({e["ref"] for e in result["open_endpoints"]}, {"3:1", "4:0", "4:2"})
+        turnout = next(p for p in result["pieces"] if p["id"] == 4)
+        self.assertEqual(turnout["kind"], "turnout")
+        self.assertEqual(turnout["endpoints"][1]["connected_to"], "1:0")
+        self.assertEqual(svg.count('data-piece-id="4"'), 4)
+        self.assertIn("3:1</text>", svg)
+        self.assertIn("#c65d00", svg)
+        self.assertAlmostEqual(result["board_mm"][0], 2438.4)
+        self.assertAlmostEqual(turnout["position_mm"][0], 275.25, places=3)
+        # Endpoint coordinates in the file are already world coordinates.
+        self.assertAlmostEqual(result["open_endpoints"][0]["position_mm"][0], 1004.619, places=2)
+
+    def test_generated_and_xtrackcad_saved_ovals(self):
+        for name in ("layout-_c4rr1_w.xtc", "layout-w7r0lfkz.xtc", "mrkln_sample2.xtc"):
+            source = main.ROOT / "layouts" / name
+            with self.subTest(source=source.name):
+                result, _ = self.inspect_text(source.read_text())
+                self.assertTrue(result["ok"], result)
+                self.assertEqual(result["status"], "complete")
+                self.assertEqual(result["piece_count"], 14)
+                self.assertEqual(result["open_endpoint_count"], 0)
+                self.assertEqual(result["component_count"], 1)
+                self.assertEqual(result["connection_issues"], [])
+        # Also exercise the current writer without relying on saved fixtures.
+        with tempfile.TemporaryDirectory() as directory, patch.object(main, "OUTPUT", Path(directory)):
+            built = main.build_layout(OVAL)
+            result, _ = self.inspect_text(Path(built["path"]).read_text())
+            self.assertEqual(result["open_endpoint_count"], 0)
+            self.assertEqual(result["connection_issues"], [])
+
+    def test_broken_links_are_not_open_ends_or_confirmed_connections(self):
+        cases = [
+            (self.sample.replace("T4 4 18.250000", "T4 999 18.250000"), "missing_neighbor"),
+            (self.sample.replace("T4 1 18.250000", "T4 2 18.250000"), "nonreciprocal_link"),
+            (self.sample.replace("T4 1 18.250000", "T4 1 18.350000"), "position_gap"),
+            (self.sample.replace("T4 1 18.250000 39.125000 90.000000", "T4 1 18.250000 39.125000 95.000000"), "angle_mismatch"),
+        ]
+        for text, expected in cases:
+            with self.subTest(expected=expected):
+                report, svg = self.inspect_text(text)
+                self.assertTrue(report["ok"], report)
+                self.assertIn(expected, [issue["type"] for issue in report["connection_issues"]])
+                self.assertEqual(report["open_endpoint_count"], 3)
+                self.assertGreater(report["component_count"], 1)
+                self.assertIn("#dc2626", svg)
+
+    def test_ambiguous_links_are_not_guessed(self):
+        first = self.sample.index('\tT4 1 18.250000')
+        end = self.sample.index('\n', first)
+        text = self.sample[:end] + "\n" + self.sample[first:end] + self.sample[end:]
+        report, _ = self.inspect_text(text)
+        self.assertIn("ambiguous_link", [i["type"] for i in report["connection_issues"]])
+
+    def test_nearby_open_ends_stay_open(self):
+        text = self.sample.replace('T4 4 18.250000', 'E4 18.250000').replace('T4 1 18.250000', 'E4 18.250000')
+        result, _ = self.inspect_text(text)
+        self.assertEqual(result["open_endpoint_count"], 5)
+        self.assertEqual(result["component_count"], 2)
+        self.assertEqual(result["connection_issues"], [])
+
+    def test_unsupported_records_make_partial_results_explicit(self):
+        cases = [self.sample.replace('END$TRACKS', 'MYSTERY 99\n\tS 0 0 0 0 1 1\n\tEND$SEGS\nEND$TRACKS'),
+                 self.sample.replace('\tD 0.000000', '\tUNKNOWN 1 2\n\tD 0.000000', 1)]
+        for text in cases:
+            report, svg = self.inspect_text(text)
+            self.assertTrue(report["ok"], report)
+            self.assertEqual(report["status"], "incomplete")
+            self.assertFalse(report["topology_complete"])
+            self.assertEqual(report["piece_count"], 4)
+            self.assertTrue(report["warnings"])
+            self.assertIn("INCOMPLETE", svg)
+        report, _ = self.inspect_text(self.sample.replace('T4 4 ', 'T3 4 ', 1))
+        self.assertEqual(report["status"], "incomplete")
+        self.assertEqual(report["pieces"][0]["endpoints"][0]["ref"], "1:1")
+        report, _ = self.inspect_text(self.sample.replace('T4 ', 'T3 ').replace('E4 ', 'E3 '))
+        self.assertEqual(report["status"], "incomplete")
+        self.assertEqual(report["open_endpoint_count"], 0)
+        report, svg = self.inspect_text(self.sample.replace('VERSION 12', 'VERSION 99'))
+        self.assertEqual(report["status"], "incomplete")
+        self.assertEqual(report["piece_count"], 0)
+        self.assertEqual(report["warnings"][0]["record"], "VERSION")
+        self.assertIn("Board: dimensions unavailable", svg)
+
+    def test_malformed_records_return_errors_without_previews(self):
+        cases = [self.sample.replace('END$TRACKS', ''),
+                 self.sample.replace('\tEND$SEGS', '', 1),
+                 self.sample.replace('TURNOUT  2 ', 'TURNOUT  1 '),
+                 self.sample.replace('96.000000 x', 'nan x'),
+                 self.sample.replace('18.250000 39.125000 270.000000', 'nan 39.125000 270.000000', 1),
+                 self.sample.replace('E4 39.551934 46.211615 30.000000', 'E4 39.551934 46.211615', 1),
+                 self.sample.replace('P "Normal" 1', 'P "Normal" 99', 1),
+                 self.sample.replace('TITLE1 mcptest', 'TITLE1 null\x00byte')]
+        for case, text in enumerate(cases):
+            self.assertNotEqual(text, self.sample)
+            with self.subTest(case=case):
+                report, _ = self.inspect_text(text)
+                self.assertFalse(report["ok"], report)
+                self.assertTrue(report["errors"][0]["message"])
+
+    def test_missing_file_and_wrong_extension(self):
+        for path in ('does-not-exist.xtc', 'README.md'):
+            report = main.inspect_layout(path)
+            self.assertFalse(report["ok"])
+
+    def test_svg_escapes_file_labels(self):
+        text = self.sample.replace('TITLE1 mcptest', 'TITLE1 <script>alert(1)</script> & title')
+        report, svg = self.inspect_text(text)
+        self.assertTrue(report["ok"], report)
+        self.assertNotIn('<script>', svg)
+        self.assertIn('&lt;script&gt;', svg)
+
+
 class ProtocolTests(unittest.IsolatedAsyncioTestCase):
     async def test_real_stdio_client(self):
         import sys
@@ -108,7 +248,7 @@ class ProtocolTests(unittest.IsolatedAsyncioTestCase):
             async with ClientSession(read, write, read_timeout_seconds=timedelta(seconds=10)) as session:
                 await session.initialize()
                 tools = await session.list_tools()
-                self.assertEqual({t.name for t in tools.tools}, {"list_parts", "build_layout"})
+                self.assertEqual({t.name for t in tools.tools}, {"list_parts", "build_layout", "inspect_layout"})
                 catalogue = await session.call_tool("list_parts", {"query": "24130"})
                 self.assertFalse(catalogue.isError)
                 result = await session.call_tool("build_layout", {"parts": OVAL})
@@ -123,6 +263,18 @@ class ProtocolTests(unittest.IsolatedAsyncioTestCase):
                 finally:
                     if path.parent == main.OUTPUT:
                         path.unlink(missing_ok=True)
+                inspected = await session.call_tool("inspect_layout", {"path": "files/mrkln_sample.xtc"})
+                self.assertFalse(inspected.isError)
+                report = inspected.structuredContent
+                preview = Path(report["preview_path"])
+                try:
+                    self.assertEqual(report["piece_count"], 4)
+                    self.assertEqual(report["open_endpoint_count"], 3)
+                    self.assertEqual(report["status"], "complete")
+                    self.assertEqual(preview.parent, main.PREVIEWS)
+                finally:
+                    if preview.parent == main.PREVIEWS:
+                        preview.unlink(missing_ok=True)
                 invalid = await session.call_tool("build_layout", {"parts": ["not-a-part"] * 3})
                 self.assertFalse(invalid.structuredContent["ok"])
 
