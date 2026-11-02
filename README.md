@@ -4,7 +4,7 @@ A local Python MCP server that helps an AI build flat Märklin C-track layouts
 for XTrackCAD. Python computes geometry; the AI chooses an ordered sequence of
 catalogue pieces. The only direct dependency is the official Python MCP SDK.
 
-See [ROADMAP.md](ROADMAP.md) for the proposed feature plan and next milestone.
+See [roadmap](docs/ROADMAP.md) for the proposed feature plan and next milestone.
 
 ## Run and connect
 
@@ -12,8 +12,14 @@ Requires Python 3.13+ and `uv`.
 
 ```sh
 uv sync --locked
-uv run --locked main.py
+uv run --locked python -m turnout
 ```
+
+`uv sync` installs this checkout as an editable package. Keep the checkout and
+its data directories in place; standalone wheel installation is not supported.
+The existing `uv run --locked main.py` command remains available for compatibility.
+After pulling this reorganization, run `uv sync --locked` once before using an
+existing MCP registration.
 
 The server uses stdio, so the second command waits for an MCP client rather than
 showing an interactive prompt. Diagnostics go to stderr.
@@ -38,6 +44,24 @@ args = ["/absolute/path/to/turnout/main.py"]
 See the [official Codex MCP configuration documentation](https://learn.chatgpt.com/docs/extend/mcp?surface=cli).
 The server does not call a model or require an API key.
 
+## Repository structure
+
+| Path | Purpose |
+| --- | --- |
+| `src/turnout/server.py` | Catalogue, geometry, layout inspection, and MCP tools |
+| `tests/` | Automated unit and MCP protocol tests |
+| `tests/fixtures/` | Committed regression layouts, including accepted ovals |
+| `data/catalogues/` | Runtime track catalogue |
+| `examples/` | Read-only example layouts |
+| `docs/` | Feature roadmap and repository rules |
+| `.github/` | CI, dependency updates, and contribution templates |
+| `layouts/`, `previews/` | Local generated outputs, ignored by Git |
+| `main.py` | Compatibility launcher for existing MCP registrations |
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development checks and
+[repository rules](docs/REPOSITORY_RULES.md) for proposed GitHub protections and
+further improvements. Hosted branch protection has to be configured separately.
+
 ## Tools
 
 - `list_parts(query="")`: search supported catalogue pieces by part number or
@@ -51,7 +75,7 @@ The server does not call a model or require an API key.
 
 For example, ask Codex:
 
-> Use turnout to inspect `files/mrkln_sample.xtc`. Show the labelled preview,
+> Use turnout to inspect `examples/mrkln_sample.xtc`. Show the labelled preview,
 > list its open endpoints, and explain any connection issues.
 
 Paths may be absolute or relative to this checkout. References such as `4:2` mean
@@ -104,7 +128,7 @@ connections, with conversion to inches only at export.
 
 ## Validation and current scope
 
-- Reads ordinary straights and curves from `files/mrklnhoc-de.xtp`; unsupported
+- Reads ordinary straights and curves from `data/catalogues/mrklnhoc-de.xtp`; unsupported
   part numbers, including turnouts and special tracks, are rejected.
 - Traverses every piece from catalogue endpoint 0 to endpoint 1. Curves turn
   left; reversed traversal and mirrored pieces are not implemented.
@@ -124,14 +148,14 @@ connections, with conversion to inches only at export.
   They create no layout file. Successful builds use unique filenames and never
   replace earlier layouts or the supplied sample.
 
-The sample `files/mrkln_sample.xtc` is a format reference, not an input to edit.
+The sample `examples/mrkln_sample.xtc` is a format reference, not an input to edit.
 The writer targets its `VERSION 12 5.2.0` format. See XTrackCAD's
 [compound element format documentation](https://sourceforge.net/p/xtrkcad-fork/wiki/CompoundElements/).
 
 ## Checks and XTrackCAD acceptance
 
 ```sh
-uv run --locked python -m unittest -v
+uv run --locked python -m unittest discover -s tests -v
 ```
 
 The stdlib tests check catalogue filtering, dimensions, exported reciprocal
@@ -153,7 +177,7 @@ reopen the saved copy. Check that the pieces and connections remain intact.
 
 **Status:** first milestone accepted on 2026-11-02. Automated geometry and MCP
 checks pass, and the user confirmed the generated test oval works in XTrackCAD
-(`layouts/layout-w7r0lfkz.xtc`) after the requested open/save verification.
+(`tests/fixtures/layout-w7r0lfkz.xtc` (originally `layouts/layout-w7r0lfkz.xtc`)) after the requested open/save verification.
 `xtrackcad_verified: false` in new build results still means that each generated
 file needs its own application check; Python does not perform GUI verification.
 
