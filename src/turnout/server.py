@@ -4,8 +4,9 @@ from collections import Counter
 from dataclasses import dataclass
 from html import escape
 from math import atan2, cos, degrees, dist, isfinite, radians, sin, sqrt
-from pathlib import Path
+import re
 import shlex
+from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any
 
@@ -13,6 +14,7 @@ from mcp.server.fastmcp import FastMCP
 
 ROOT = Path(__file__).resolve().parents[2]
 CATALOGUE = ROOT / "data/catalogues/mrklnhoc-de.xtp"
+CATALOGUES = CATALOGUE.parent
 OUTPUT = ROOT / "layouts"
 PREVIEWS = ROOT / "previews"
 MM = 25.4
@@ -26,32 +28,55 @@ class Part:
     title: str
     ends: list[tuple[float, float, float]]
     rows: list[str]
+    scale: str = "HO"
+    options: int = 0
 
     @property
     def number(self):
         return self.title.split("\t")[-1]
 
 
-def load_catalogue():
-    """Only ordinary two-ended pieces with one straight or circular centreline."""
+def load_catalogue(path=None, ordinary_only=False):
+    """Read compound track definitions, including their paths and artwork."""
     parts = {}
-    for block in CATALOGUE.read_text(encoding="utf-8").split("TURNOUT HO ")[1:]:
+    text = (path or CATALOGUE).read_text(encoding="utf-8-sig")
+    for block in re.split(r"(?m)^TURNOUT\s+", text)[1:]:
         header, *lines = block.splitlines()
-        title = header.strip().strip('"')
+        fields = shlex.split(header)
+        if len(fields) not in (2, 3):
+            raise ValueError("Unsupported catalogue track header.")
+        scale, title = fields[:2]
+        options = int(fields[2]) if len(fields) == 3 else 0
+        if options & ~512:
+            raise ValueError("Unsupported catalogue track options.")
         rows = []
         for line in lines:
             line = line.strip()
-            if line == "END":
+            if line in {"END", "END$SEGS"}:
                 break
-            rows.append(line)
+            if line and not line.startswith(("#", "U ")):
+                rows.append(line)
+        else:
+            raise ValueError("Unterminated catalogue track.")
         ends = [tuple(float(v) * (MM if i < 2 else 1)
                       for i, v in enumerate(row.split()[1:]))
                 for row in rows if row.startswith("E ")]
+        if any(len(end) != 3 or not all(isfinite(v) and abs(v) <= 1e9 for v in end) for end in ends):
+            raise ValueError("Catalogue endpoints need three finite coordinates.")
         geometry = [r for r in rows if r.startswith(("S ", "C "))]
         ordinary = "\tGerade " in title or "\tGebogen " in title
-        if ordinary and len(ends) == 2 and len(geometry) == 1:
-            part = Part(title, ends, [r for r in rows if r.startswith(("P ", "S ", "C ", "L ", "A "))])
+        if not ordinary_only or ordinary and len(ends) == 2 and len(geometry) == 1:
+            part = Part(title, ends, [r for r in rows if not r.startswith("E ")], scale, options)
+            if len(title.split("\t")) != 3 or not ends or not geometry or part.number in parts:
+                raise ValueError("Catalogue tracks need unique part numbers, endpoints and geometry.")
+            # Parse our exported form too: unknown records must fail before editing.
+            block_text = piece_text(part, 1, (0, 0), 0)
+            parsed, _ = read_layout(layout_header() + block_text + "END$TRACKS\n")
+            if parsed["warnings"]:
+                raise ValueError(f"Unsupported catalogue records for {part.number}.")
             parts[part.number] = part
+    if not parts:
+        raise ValueError("No supported track definitions in parameter file.")
     return parts
 
 
@@ -161,51 +186,84 @@ def intersections(a, b):
     return [p for p in points if a.contains(p) and b.contains(p)]
 
 
-@mcp.tool()
-def list_parts(query: str = "") -> list[dict[str, Any]]:
-    """Find supported ordinary Märklin C-track straights/curves by number or description.
+def catalogue_path(name):
+    path = (CATALOGUES / name).resolve()
+    if path.parent != CATALOGUES.resolve() or path.suffix.lower() != ".xtp":
+        raise ValueError("Choose an .xtp file directly inside data/catalogues/.")
+    return path
 
-    Dimensions are mm. Build sequences enter endpoint 0 and leave endpoint 1;
-    curves turn left. Turnouts, special tracks and catalogue editing are unsupported.
+
+@mcp.tool()
+def list_parts(query: str = "", catalogue: str = "mrklnhoc-de.xtp") -> list[dict[str, Any]]:
+    """Search all track in a data/catalogues/ .xtp file. Endpoint indices are zero-based.
+
+    attach_track accepts every listed piece. build_layout still accepts only ordinary
+    straights/curves. Length is total rail centreline, not usable train length.
     """
     result = []
-    for part in load_catalogue().values():
+    for part in load_catalogue(catalogue_path(catalogue)).values():
         if query.casefold() not in part.title.casefold():
             continue
-        shape = segment(part, (0, 0), 0)
+        shapes = [segment_row(row, (0, 0), 0) for row in part.rows if row.startswith(("S ", "C "))]
+        shape = shapes[0]
         result.append({"part_number": part.number, "description": part.title.split("\t")[1],
-                       "kind": "curve" if shape.center else "straight",
-                       "length_mm": shape.radius * radians(shape.sweep) if shape.center else dist(shape.a, shape.b),
-                       "radius_mm": shape.radius if shape.center else None,
-                       "angle_deg": shape.sweep,
-                       "endpoints_mm": part.ends})
+                       "kind": "terminal" if len(part.ends) == 1 else "compound" if len(shapes) > 1 else "curve" if shape.center else "straight",
+                       "length_mm": sum(s.radius * radians(s.sweep) if s.center else dist(s.a, s.b) for s in shapes),
+                       "radius_mm": shape.radius if len(shapes) == 1 and shape.center else None,
+                       "angle_deg": shape.sweep if len(shapes) == 1 else None,
+                       "endpoints_mm": part.ends, "scale": part.scale,
+                       "paths": [shlex.split(row)[1:] for row in part.rows if row.startswith("P ")]})
     return result
 
 
-def layout_text(placed, width, height):
-    lines = ["# Generated by turnout", "VERSION 12 5.2.0", "TITLE1 Turnout C-track layout",
+def layout_header(width=2000, height=1200):
+    return "\n".join(["# Generated by turnout", "VERSION 12 5.2.0", "TITLE1 Turnout C-track layout",
              "TITLE2 Flat closed loop", "MAPSCALE 32",
              f"ROOMSIZE {width / MM:.6f} x {height / MM:.6f}", "SCALE HO",
              'LAYERS 0 1 0 1 192 0 0 0 0 "Main" 1 0 9.750000 0.000000 0.616800 0.100000 0.200000',
-             "LAYERS CURRENT 0"]
+             "LAYERS CURRENT 0", ""])
+
+
+def piece_text(part, track_id, origin, angle, layer=0, links=None):
+    """Export one compound piece; retain catalogue ordering and drawing geometry."""
+    links = links or {}
+    lines = [f'TURNOUT {track_id} {layer} {part.options} 0 0 {part.scale} 2 {origin[0] / MM:.6f} {origin[1] / MM:.6f} 0 {angle:.6f} "{part.title}"']
+    for index, end in enumerate(part.ends):
+        x, y = transform(end, origin, angle)
+        tag = f"T4 {links[index]}" if index in links else "E4"
+        lines.append(f'\t{tag} {x / MM:.6f} {y / MM:.6f} {(end[2] + angle) % 360:.6f} 0 0.0 0.0 0.0 0.0 0 0 0 0.000000')
+    lines.append("\tD 0.000000 0.000000")
+    vertices = 0
+    for row in part.rows:
+        fields = row.split()
+        if vertices:
+            if len(fields) != 2:
+                raise ValueError("Expected catalogue polygon vertex.")
+            row += " 0"
+            vertices -= 1
+        elif fields[0] == "L":
+            row = " ".join(["L3", *fields[1:5], "0", *fields[5:], "0"])
+        elif fields[0] == "A":
+            row = " ".join(["A3", *fields[1:6], "0", *fields[6:]])
+        elif fields[0] == "G":
+            row = " ".join(["G3", *fields[1:], "0"])
+        elif fields[0] == "F":
+            if len(fields) != 4:
+                raise ValueError("Invalid catalogue polygon header.")
+            vertices = int(fields[3])
+            row = " ".join(["F3", *fields[1:]])
+        lines.append("\t" + row)
+    if vertices:
+        raise ValueError("Unterminated catalogue polygon.")
+    return "\n".join(lines + ["\tEND$SEGS", ""])
+
+
+def layout_text(placed, width, height):
+    text = layout_header(width, height)
     for i, (part, origin, angle) in enumerate(placed):
-        lines.append(f'TURNOUT {i + 1} 0 0 0 0 HO 2 {origin[0] / MM:.6f} {origin[1] / MM:.6f} 0 {angle:.6f} "{part.title}"')
         neighbors = ((i - 1) % len(placed) + 1, (i + 1) % len(placed) + 1)
-        for end, neighbor in zip(part.ends, neighbors):
-            x, y = transform(end, origin, angle)
-            lines.append(f'\tT4 {neighbor} {x / MM:.6f} {y / MM:.6f} {(end[2] + angle) % 360:.6f} 0 0.0 0.0 0.0 0.0 0 0 0 0.000000')
-        lines.append("\tD 0.000000 0.000000")
-        for row in part.rows:
-            fields = row.split()
-            if fields[0] == "L":
-                fields = ["L3", *fields[1:5], "0", *fields[5:], "0"]
-                row = " ".join(fields)
-            elif fields[0] == "A":
-                fields = ["A3", *fields[1:6], "0", *fields[6:]]
-                row = " ".join(fields)
-            lines.append("\t" + row)
-        lines.append("\tEND$SEGS")
-    return "\n".join(lines + ["END$TRACKS", ""])
+        text += piece_text(part, i + 1, origin, angle, links=dict(enumerate(neighbors)))
+    return text + "END$TRACKS\n"
 
 
 @mcp.tool()
@@ -225,7 +283,7 @@ def build_layout(parts: list[str], width_mm: float = 2000, height_mm: float = 12
         return {"ok": False, "errors": [{"type": "board", "message": "Board dimensions must be finite and >100 to 100000 mm."}]}
     if not 3 <= len(parts) <= 500:
         return {"ok": False, "errors": [{"type": "parts", "message": "Supply 3 to 500 part numbers."}]}
-    catalogue = load_catalogue()
+    catalogue = load_catalogue(ordinary_only=True)
     unknown = sorted(set(parts) - catalogue.keys())
     if unknown:
         return {"ok": False, "errors": [{"type": "unsupported_parts", "parts": unknown}]}
@@ -315,12 +373,22 @@ def read_layout(text):
     endpoint_ordinal = 0
     skipping = False
     ended = False
+    vertices = 0
+    segment_ordinal = 0
     for line_number, raw in enumerate(lines, 1):
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
         try:
             tag = line.split()[0]
+            if vertices:
+                values = finite_numbers(line.split())
+                if len(values) != 3:
+                    raise ValueError("Expected a three-coordinate polygon vertex.")
+                if values[2] != 0:
+                    warning(line_number, "drawing_elevation", piece)
+                vertices -= 1
+                continue
             if ended:
                 raise ValueError("Unexpected data after END$TRACKS.")
             if skipping:
@@ -341,11 +409,16 @@ def read_layout(text):
                 if not segment_count:
                     warning(line_number, "missing_supported_geometry", piece)
                 for path in piece["paths"]:
-                    if any(index == 0 or abs(index) > segment_count for index in path["segments"]):
+                    indices = path["segments"]
+                    if not indices[0] or not indices[-1] or any(a == b == 0 for a, b in zip(indices, indices[1:])):
+                        raise ValueError("Empty route in compound path.")
+                    if any(index and abs(index) not in piece["track_segment_indices"] for index in indices):
                         if not any(w.get("piece_id") == piece["id"] for w in layout["warnings"]):
                             raise ValueError("Path refers to a missing track segment.")
                         warning(line_number, "unresolved_path", piece)
-                piece["kind"] = ("turnout" if len(piece["endpoints"]) > 2 or len(piece["paths"]) > 1
+                piece["kind"] = ("terminal" if len(piece["endpoints"]) == 1
+                                 else "crossing" if len(piece["paths"]) == 1 and 0 in piece["paths"][0]["segments"]
+                                 else "turnout" if len(piece["endpoints"]) > 2 or len(piece["paths"]) > 1
                                  else "curve" if segment_count == 1 and shapes[piece["id"]][0].center
                                  else "straight" if segment_count == 1 else "compound")
                 piece = None
@@ -370,6 +443,8 @@ def read_layout(text):
                     if any(values[3:]):
                         warning(line_number, "endpoint_elevation_metadata", piece)
                 elif tag in {"S", "C"}:
+                    segment_ordinal += 1
+                    piece["track_segment_indices"].append(segment_ordinal)
                     expected = 7 if tag == "S" else 8
                     if len(fields) != expected:
                         raise ValueError(f"Invalid {tag} geometry record.")
@@ -384,7 +459,22 @@ def read_layout(text):
                     if len(fields) < 3:
                         raise ValueError("A path needs a name and segment indices.")
                     piece["paths"].append({"name": fields[1], "segments": [int(v) for v in fields[2:]]})
-                elif tag not in {"D", "L3", "A3"}:
+                elif tag in {"D", "L3", "A3", "G3", "F3"}:
+                    if tag != "D":
+                        segment_ordinal += 1
+                    expected = {"D": 3, "L3": 9, "A3": 9, "G3": 7, "F3": 4}[tag]
+                    if len(fields) != expected:
+                        raise ValueError(f"Invalid {tag} drawing record.")
+                    values = finite_numbers(fields[1:])
+                    if tag == "F3":
+                        vertices = int(fields[3])
+                        if not 3 <= vertices <= 10000 or values[2] != vertices:
+                            raise ValueError("Invalid polygon vertex count.")
+                    elif tag != "D":
+                        z_values = values[4::3] if tag == "L3" else [values[5]]
+                        if any(z_values):
+                            warning(line_number, "drawing_elevation", piece)
+                else:
                     if tag in {"E", "T", "E2", "T2", "E3", "T3"}:
                         endpoint_ordinal += 1
                     warning(line_number, tag, piece)
@@ -407,8 +497,10 @@ def read_layout(text):
                          "layer": layer, "scale": fields[6],
                          "position_mm": [v * MM for v in numeric[:2]],
                          "elevation_mm": numeric[2] * MM, "rotation_deg": numeric[3] % 360,
-                         "endpoints": [], "paths": [], "unsupported_transform": bool(options & 16)}
+                         "endpoints": [], "paths": [], "track_segment_indices": [],
+                         "unsupported_transform": bool(options & 16)}
                 endpoint_ordinal = 0
+                segment_ordinal = 0
                 shapes[track_id] = []
                 layout["pieces"].append(piece)
                 if piece["unsupported_transform"] or int(fields[4]) != 0 or int(fields[5]) != 0:
@@ -441,6 +533,8 @@ def read_layout(text):
                 skipping = True
         except (ValueError, IndexError) as error:
             raise ValueError(f"Line {line_number}: {error}") from error
+    if vertices:
+        raise ValueError("Unterminated polygon.")
     if piece is not None:
         raise ValueError("Unterminated compound piece (missing END$SEGS).")
     if not ended or layout["board_mm"] is None or layout["scale"] is None:
@@ -507,6 +601,184 @@ def inspect_connections(pieces):
         remaining -= component
         components.append(sorted(component))
     return issues, components
+
+
+def read_layout_file(path):
+    source = Path(path).expanduser()
+    if not source.is_absolute():
+        source = ROOT / source
+    source = source.resolve()
+    if source.suffix.lower() != ".xtc":
+        raise ValueError("Supply an .xtc layout file.")
+    with source.open("rb") as file:
+        content = file.read(5_000_001)
+    if len(content) > 5_000_000:
+        raise ValueError("Layouts are limited to 5 MB files.")
+    text = content.decode("utf-8-sig")
+    if any(ord(char) < 32 and char not in "\t\r\n" for char in text):
+        raise ValueError("Layout contains invalid control characters.")
+    return source, content, text
+
+
+def matches_catalogue(piece, shapes, part):
+    """Match identity AND embedded geometry: a part number alone is insufficient."""
+    if piece["title"] != part.title or piece["scale"] != part.scale or len(piece["endpoints"]) != len(part.ends):
+        return False
+    origin, angle = piece["position_mm"], piece["rotation_deg"]
+    for end, expected in zip(piece["endpoints"], part.ends):
+        if (dist(end["position_mm"], transform(expected, origin, angle)) > POSITION_TOLERANCE
+                or angle_error(end["angle_deg"], expected[2] + angle) > ANGLE_TOLERANCE):
+            return False
+    expected_shapes = [segment_row(row, origin, angle) for row in part.rows if row.startswith(("S ", "C "))]
+    if len(shapes) != len(expected_shapes):
+        return False
+    for actual, expected in zip(shapes, expected_shapes):
+        if (actual.center is None) != (expected.center is None):
+            return False
+        if actual.center is None:
+            if dist(actual.a, expected.a) > POSITION_TOLERANCE or dist(actual.b, expected.b) > POSITION_TOLERANCE:
+                return False
+        elif (dist(actual.center, expected.center) > POSITION_TOLERANCE
+              or abs(actual.radius - expected.radius) > POSITION_TOLERANCE
+              or angle_error(actual.start, expected.start) > ANGLE_TOLERANCE
+              or abs(actual.sweep - expected.sweep) > ANGLE_TOLERANCE):
+            return False
+    paths = [{"name": fields[1], "segments": list(map(int, fields[2:]))}
+             for fields in (shlex.split(row) for row in part.rows if row.startswith("P "))]
+    return piece["paths"] == paths
+
+
+def resolve_track_system(layout, shapes, selection=""):
+    """One .xtp is the authority for a layout; never infer from the requested addition."""
+    paths = [catalogue_path(selection)] if selection else sorted(CATALOGUES.glob("*.xtp"))
+    matches, errors = [], []
+    for path in paths:
+        try:
+            parts = load_catalogue(catalogue_path(path.name))
+            if layout["pieces"] and all(
+                piece["scale"] == layout["scale"] and piece["part_number"] in parts
+                and matches_catalogue(piece, shapes[piece["id"]], parts[piece["part_number"]])
+                for piece in layout["pieces"]
+            ):
+                matches.append((path, parts))
+        except (OSError, ValueError, UnicodeError) as error:
+            errors.append({"catalogue": path.name, "message": str(error)})
+    report = {"status": "matched" if len(matches) == 1 else "selection_required",
+              "catalogue": matches[0][0].name if len(matches) == 1 else None,
+              "candidates": [p.name for p, _ in matches],
+              "available_catalogues": sorted(p.name for p in CATALOGUES.glob("*.xtp")),
+              "catalogue_errors": errors}
+    return report, matches
+
+
+@mcp.tool()
+def attach_track(path: str, endpoint: str, part_number: str, entry_endpoint: int = 0,
+                 catalogue: str = "") -> dict[str, Any]:
+    """Attach ONE catalogue piece to an explicitly open pieceID:endpointIndex.
+
+    Read the layout's system first using data/catalogues/*.xtp. Missing/ambiguous
+    matches require explicit catalogue selection; all existing pieces must match it.
+    Entry indices are zero-based, permitting reversed curves and any turnout entry.
+    Remaining endpoints stay open, including those of crossings. A buffer terminates.
+    Reject incomplete/inconsistent inputs, board overflow and new centreline collisions.
+    Preserve existing positions and unrelated bytes; save a unique revision + SVG.
+    Does not check roadbed/vehicle clearance or simulate turnout routes.
+    """
+    try:
+        source, content, text = read_layout_file(path)
+        layout, shapes = read_layout(text)
+        issues, _ = inspect_connections(layout["pieces"])
+        if layout["warnings"] or issues:
+            return {"ok": False, "errors": [{"type": "input_layout", "message": "Editing requires a fully understood layout with consistent connections.",
+                                             "warnings": layout["warnings"], "connection_issues": issues}]}
+        system, matches = resolve_track_system(layout, shapes, catalogue)
+        if len(matches) != 1:
+            return {"ok": False, "track_system": system, "errors": [{"type": "track_system", "message": "Select a unique .xtp matching every existing piece; mixed systems or altered catalogue geometry cannot be edited."}]}
+        _, parts = matches[0]
+        if part_number not in parts:
+            raise ValueError("Requested part is absent from the layout's parameter file.")
+        if len(layout["pieces"]) >= 500:
+            raise ValueError("Attachment is limited to 500 total pieces.")
+        targets = [(piece, end) for piece in layout["pieces"] for end in piece["endpoints"] if end["ref"] == endpoint]
+        if len(targets) != 1 or targets[0][1]["status"] != "open":
+            raise ValueError("Choose an existing explicitly open endpoint (pieceID:index).")
+        parent, target = targets[0]
+        part = parts[part_number]
+        if part.scale != layout["scale"]:
+            raise ValueError("Requested piece scale differs from the layout scale.")
+        if isinstance(entry_endpoint, bool) or not isinstance(entry_endpoint, int) or not 0 <= entry_endpoint < len(part.ends):
+            raise ValueError("Entry endpoint index is outside this catalogue piece.")
+        angle = (target["angle_deg"] + 180 - part.ends[entry_endpoint][2]) % 360
+        origin = subtract(target["position_mm"], transform(part.ends[entry_endpoint], (0, 0), angle))
+        added_shapes = [segment_row(row, origin, angle) for row in part.rows if row.startswith(("S ", "C "))]
+        errors = []
+        for axis, limit in enumerate(layout["board_mm"]):
+            coordinates = [p[axis] for shape in added_shapes for p in shape.bounds_points()]
+            low, high = min(coordinates), max(coordinates)
+            if low < -POSITION_TOLERANCE or high > limit + POSITION_TOLERANCE:
+                errors.append({"type": "boundary", "axis": "xy"[axis], "minimum_mm": low, "maximum_mm": high, "board_limit_mm": limit})
+        # ponytail: O(new segments × existing segments), capped at 500 pieces; index if larger plans matter.
+        for piece_id, group in shapes.items():
+            if any(dist(point, target["position_mm"]) > POSITION_TOLERANCE or piece_id != parent["id"]
+                   for a in added_shapes for b in group for point in intersections(a, b)):
+                errors.append({"type": "intersection", "existing_piece_id": piece_id})
+        if errors:
+            return {"ok": False, "errors": errors}
+        new_id = max(piece["id"] for piece in layout["pieces"]) + 1
+        block = piece_text(part, new_id, origin, angle, parent["layer"], {entry_endpoint: parent["id"]})
+        # Patch the original bytes, including BOM, line endings, whitespace and comments.
+        lines = content.splitlines(keepends=True)
+        newline = b"\r\n" if b"\r\n" in content else b"\n"
+        current_id, ordinal, changed, inserted = None, 0, False, False
+        revised = []
+        for raw in lines:
+            fields = raw.decode("utf-8-sig").split()
+            if fields and fields[0] == "TURNOUT":
+                current_id, ordinal = int(fields[1]), 0
+            elif fields and fields[0] in {"E4", "T4"}:
+                if current_id == parent["id"] and ordinal == int(endpoint.split(":")[1]):
+                    raw = raw.replace(b"E4", f"T4 {new_id}".encode(), 1)
+                    changed = True
+                ordinal += 1
+            elif fields and fields[0] == "END$TRACKS":
+                revised.append(block.replace("\n", newline.decode()).encode("utf-8"))
+                inserted = True
+            revised.append(raw)
+        if not changed or not inserted:
+            raise ValueError("Could not locate the source records safely.")
+        output = b"".join(revised)
+        if len(output) > 5_000_000:
+            raise ValueError("Revised layout would exceed the 5 MB input limit.")
+        result_layout, result_shapes = read_layout(output.decode("utf-8-sig"))
+        result_issues, components = inspect_connections(result_layout["pieces"])
+        if result_layout["warnings"] or result_issues:
+            raise ValueError("Revised layout failed connection/format validation.")
+        preview = Path(write_preview(result_layout, result_shapes, result_issues, True))
+        output_path = None
+        try:
+            OUTPUT.mkdir(exist_ok=True)
+            with NamedTemporaryFile(mode="wb", prefix="revision-", suffix=".xtc", dir=OUTPUT, delete=False) as file:
+                output_path = Path(file.name)
+                file.write(output)
+        except BaseException:
+            preview.unlink(missing_ok=True)
+            if output_path:
+                output_path.unlink(missing_ok=True)
+            raise
+        open_ends = [e for p in result_layout["pieces"] for e in p["endpoints"] if e["status"] == "open"]
+        return {"ok": True, "path": str(output_path), "source_path": str(source),
+                "track_system": system, "preview_path": str(preview),
+                "piece_count": len(result_layout["pieces"]),
+                "parts": dict(Counter(p["part_number"] for p in result_layout["pieces"])),
+                "changes": {"added_piece_ids": [new_id], "removed_piece_ids": [], "moved_piece_ids": [],
+                            "parts_delta": {part_number: 1}, "connected_endpoints": [endpoint, f"{new_id}:{entry_endpoint}"],
+                            "new_open_endpoints": [e["ref"] for e in open_ends if e["ref"].startswith(f"{new_id}:")],
+                            "closed_open_endpoints": [endpoint]},
+                "open_endpoints": open_ends, "open_endpoint_count": len(open_ends),
+                "connection_issues": result_issues, "components": components,
+                "xtrackcad_verified": False}
+    except (OSError, ValueError, UnicodeError) as error:
+        return {"ok": False, "errors": [{"type": "attachment", "message": str(error)}]}
 
 
 def write_preview(layout, shapes, issues, complete):
@@ -605,20 +877,8 @@ def inspect_layout(path: str) -> dict[str, Any]:
     supported subset only. Malformed supported records return ok false and no preview.
     SVGs are separate unique files in previews/. This is not a clearance/3D check.
     """
-    source = Path(path).expanduser()
-    if not source.is_absolute():
-        source = ROOT / source
     try:
-        source = source.resolve()
-        if source.suffix.lower() != ".xtc":
-            raise ValueError("Supply an .xtc layout file.")
-        with source.open("rb") as file:
-            content = file.read(5_000_001)
-        if len(content) > 5_000_000:
-            raise ValueError("Inspection is limited to 5 MB files.")
-        text = content.decode("utf-8-sig")
-        if any(ord(char) < 32 and char not in "\t\r\n" for char in text):
-            raise ValueError("Layout contains invalid control characters.")
+        source, _, text = read_layout_file(path)
         layout, shapes = read_layout(text)
         issues, components = inspect_connections(layout["pieces"])
         complete = not layout["warnings"]
@@ -627,11 +887,13 @@ def inspect_layout(path: str) -> dict[str, Any]:
                 if issue["type"] == "missing_neighbor":
                     issue["type"] = "unresolved_neighbor"
                     issue["message"] = "Neighbor is absent from the supported subset; unsupported elements may contain it."
+        system, _ = resolve_track_system(layout, shapes)
         preview = write_preview(layout, shapes, issues, complete)
     except (OSError, ValueError, UnicodeError) as error:
         return {"ok": False, "errors": [{"type": "inspection", "message": str(error)}]}
     open_ends = [end for piece in layout["pieces"] for end in piece["endpoints"] if end["status"] == "open"]
     return {"ok": True, "status": "complete" if complete else "incomplete", "source_path": str(source),
+            "track_system": system,
             "reference_scope": "Piece IDs and endpoint ordinals refer to this file snapshot only.",
             **layout, "piece_count": len(layout["pieces"]),
             "parts": dict(Counter(p["part_number"] or "unknown" for p in layout["pieces"])),
