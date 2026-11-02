@@ -14,11 +14,12 @@ OVAL = ["24130"] * 6 + ["24188"] + ["24130"] * 6 + ["24188"]
 
 
 class LayoutTests(unittest.TestCase):
-    def test_catalogue_filters_special_tracks(self):
+    def test_catalogue_includes_special_tracks(self):
         parts = {p["part_number"]: p for p in server.list_parts()}
         self.assertAlmostEqual(parts["24130"]["radius_mm"], 360, places=3)
         self.assertAlmostEqual(parts["24188"]["length_mm"], 188.3, places=3)
-        self.assertNotIn("24612", parts)
+        self.assertIn("24612", parts)
+        self.assertEqual(len(parts), 43)
         self.assertEqual(server.list_parts("24130"), [parts["24130"]])
 
     def test_oval_export_connections_and_dimensions(self):
@@ -248,7 +249,7 @@ class ProtocolTests(unittest.IsolatedAsyncioTestCase):
             async with ClientSession(read, write, read_timeout_seconds=timedelta(seconds=10)) as session:
                 await session.initialize()
                 tools = await session.list_tools()
-                self.assertEqual({t.name for t in tools.tools}, {"list_parts", "build_layout", "inspect_layout"})
+                self.assertEqual({t.name for t in tools.tools}, {"list_parts", "build_layout", "inspect_layout", "attach_track"})
                 catalogue = await session.call_tool("list_parts", {"query": "24130"})
                 self.assertFalse(catalogue.isError)
                 result = await session.call_tool("build_layout", {"parts": OVAL})
@@ -277,6 +278,17 @@ class ProtocolTests(unittest.IsolatedAsyncioTestCase):
                         preview.unlink(missing_ok=True)
                 invalid = await session.call_tool("build_layout", {"parts": ["not-a-part"] * 3})
                 self.assertFalse(invalid.structuredContent["ok"])
+                attached = await session.call_tool("attach_track", {
+                    "path": "examples/mrkln_sample.xtc", "endpoint": "4:2", "part_number": "24188"})
+                self.assertFalse(attached.isError)
+                data = attached.structuredContent
+                self.assertTrue(data["ok"], data)
+                try:
+                    self.assertEqual(data["changes"]["added_piece_ids"], [5])
+                    self.assertEqual(data["connection_issues"], [])
+                finally:
+                    Path(data["path"]).unlink(missing_ok=True)
+                    Path(data["preview_path"]).unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

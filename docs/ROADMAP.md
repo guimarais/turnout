@@ -48,6 +48,23 @@ is acceptable; claiming complete understanding of an unsupported file is not.
 
 ## 2. Place and edit connected track, including turnouts
 
+First increment implemented on `feature/connected-track-extension`:
+`attach_track` adds one catalogue piece at a named open endpoint, selecting its
+entry endpoint explicitly. Layouts use one track system, resolved from `.xtp`
+files under `data/catalogues/`; ambiguous/missing matches require selection and
+mixed or altered track is rejected. All 43 bundled pieces are supported, including
+turnouts, crossings and terminal/special tracks. Each revision preserves unrelated
+source bytes and returns a parts delta, open endpoints and labelled preview.
+Inputs must be fully understood with consistent connections. New geometry must
+stay inside the board without introducing centreline collisions; intentional
+intersections inside catalogue pieces are permitted. Automated checks cover all
+pieces at every entry endpoint. XTrackCAD open/save acceptance remains pending;
+see the representative fixture and instructions in [README](../README.md).
+
+Batch attachment and a configurable parameter directory are deferred. This
+increment does not yet provide removal/replacement, group movement, connector
+search, clearance analysis or turnout-setting route analysis.
+
 **User request:** “Add a right-hand turnout here and a siding long enough for my
 train. Leave the rest of the layout where it is.”
 
@@ -182,6 +199,7 @@ settings. Generated changes survive an XTrackCAD open/save round trip.
 
 1. Read-only inspection of the sample and generated oval, with stable endpoint IDs.
 2. Labelled preview and a validation report that permits intentional open ends.
-3. Catalogue paths plus ordinary left/right turnouts and buffer stops.
-4. Attach a siding to an existing layout; save a separate revision and a change summary.
-5. Verify preservation and the XTrackCAD round trip, then tackle gap-filling search.
+3. Catalogue paths and attachment of every bundled track type: implemented.
+4. Extend an existing open endpoint; save a separate revision and a change summary: implemented.
+5. Complete the XTrackCAD round trip for connected extension, then add removal/replacement
+   needed to insert a turnout into an oval before tackling gap-filling search.
