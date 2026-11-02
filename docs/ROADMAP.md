@@ -25,7 +25,7 @@ and [project overview](https://sourceforge.net/p/xtrkcad-fork/wiki/Home/).
 
 Implemented on `feature/layout-inspection`: `inspect_layout(path)`, connection
 reports and labelled SVG previews. Automated sample/oval and MCP checks pass;
-previews have been visually checked. See README for supported records and limits.
+previews have been visually checked. See [README](../README.md) for supported records and limits.
 
 **User request:** “Open my unfinished layout. What have I built, and what still
 needs connecting?”
