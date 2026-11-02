@@ -218,3 +218,12 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Generated read-only layout inspection previews
+/previews/
+
+# Layouts
+/layouts/
+
+# Parameter files
+*.xtp

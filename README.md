@@ -45,6 +45,41 @@ The server does not call a model or require an API key.
 - `build_layout(parts, width_mm=2000, height_mm=1200)`: attach an ordered sequence,
   validate it, centre it on the board, and save a new `layouts/layout-*.xtc`.
   Returns the absolute path, parts quantities, footprint and closure measurements.
+- `inspect_layout(path)`: read a saved `.xtc` and return metadata, pieces, parts
+  quantities, endpoint references, verified connected components, connection issues,
+  and a unique labelled SVG in `previews/`. The source file is never modified.
+
+For example, ask Codex:
+
+> Use turnout to inspect `files/mrkln_sample.xtc`. Show the labelled preview,
+> list its open endpoints, and explain any connection issues.
+
+Paths may be absolute or relative to this checkout. References such as `4:2` mean
+piece ID 4, endpoint 2 (zero-based order in the file); they identify this snapshot,
+not a permanent ID across future XTrackCAD edits. All reported positions are mm;
+angles follow XTrackCAD's clockwise-from-north convention.
+
+Inspection reads embedded compound-track geometry, including all turnout segments,
+without requiring the piece to be supported by the build tool's catalogue filter.
+It currently supports the observed `VERSION 12 5.2.0` records. The preview shows
+centrelines, board outline, piece/catalogue labels, orange explicit open ends and
+red connection issues. Decorations, scenery and vehicle clearance are outside its
+scope. Elevated or otherwise unsupported elements produce warnings.
+
+Open ends are intentional file records, not automatically errors. Declared links
+must have a unique reciprocal partner within 0.1 mm and 0.1° of opposing alignment.
+Missing neighbours, nonreciprocal or ambiguous links, gaps and angle errors are
+reported; nearby unconnected endpoints remain unconnected. Components use verified
+links and do not describe routes available under particular turnout settings.
+
+`status: complete` means the supported inspection was complete, not that the design
+is valid. Check `connection_issues` separately. Unsupported elements produce
+`status: incomplete`, warnings, and `topology_complete: false`; counts and previews
+then cover only the supported subset. Unsupported format versions are not guessed
+at, and unknown board dimensions are not drawn as a real board. Malformed supported
+records return `ok: false` with an error and no preview. Inputs are limited to 5 MB.
+
+After installing this feature, restart Codex to discover `inspect_layout`.
 
 Example prompt for Codex:
 
@@ -101,7 +136,9 @@ uv run --locked python -m unittest -v
 
 The stdlib tests check catalogue filtering, dimensions, exported reciprocal
 connections, preservation of prior outputs, failure cases, line/arc intersections,
-and a real stdio MCP client calling both tools. The protocol test needs normal
+read-only inspection of the unfinished sample and saved ovals, malformed and
+unsupported records, broken/ambiguous connections, SVG label escaping,
+and a real stdio MCP client calling all three tools. The protocol test needs normal
 local subprocess/thread I/O; restrictive agent sandboxes can block that I/O.
 
 For the manual compatibility check, open the returned path:
@@ -119,3 +156,8 @@ checks pass, and the user confirmed the generated test oval works in XTrackCAD
 (`layouts/layout-w7r0lfkz.xtc`) after the requested open/save verification.
 `xtrackcad_verified: false` in new build results still means that each generated
 file needs its own application check; Python does not perform GUI verification.
+
+Layout inspection acceptance: the unfinished sample reports four pieces (including
+turnout 24612), open endpoints `3:1`, `4:0`, `4:2`, and one component with no
+connection issues. Generated and XTrackCAD-saved ovals report fourteen pieces,
+zero open ends and one component. Both labelled previews have been visually checked.
